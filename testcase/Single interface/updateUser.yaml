@@ -1,0 +1,84 @@
+- baseInfo:
+    api_name: 修改用户
+    url: /dar/user/updateUser
+    method: POST
+    header:
+      Content-Type: application/x-www-form-urlencoded;charset=UTF-8
+  testCase:
+    - case_name: 正常修改用户信息
+      data:
+        username: testadduser
+        password: tset6789#$123
+        role_id: 89588181111112343
+        dates: '2023-12-31'
+        phone: 13800000000
+      validation:
+        - contains: {'status_code':200}
+        - contains: {'msg':'更新成功'}
+    #新增失败用例
+    - case_name: 无效修改·密码错误
+      data:
+        username: testadduser
+        password: wrongpass123
+        role_id: 89588181111112343
+        dates: '2023-12-31'
+        phone: 13800000000
+      validation:
+        - contains: { 'status_code': 200 }
+        - contains: { 'msg': '更新失败' }
+    - case_name: 无效修改·手机号错误
+      data:
+        username: testadduser
+        password: tset6789#$123
+        role_id: 89588181111112343
+        dates: '2023-12-31'
+        phone: 13900000000
+      validation:
+        - contains: { 'status_code': 200 }
+        - contains: { 'msg': '更新失败' }
+    - case_name: 无效修改·role_id错误
+      data:
+        username: testadduser
+        password: tset6789#$123
+        role_id: 99999999999999999
+        dates: '2023-12-31'
+        phone: 13800000000
+      validation:
+        - contains: { 'status_code': 200 }
+        - contains: { 'msg': '更新失败' }
+    - case_name: 无效修改·缺少必填参数username
+      data:
+        password: tset6789#$123
+        role_id: 89588181111112343
+        dates: '2023-12-31'
+        phone: 13800000000
+      validation:
+        - contains: { 'status_code': 200 }
+        - contains: { 'msg': '更新失败' }
+    - case_name: 无效修改·缺少password
+      data:
+        username: testadduser
+        role_id: 89588181111112343
+        dates: '2023-12-31'
+        phone: 13800000000
+      validation:
+        - contains: { 'status_code': 200 }
+        - contains: { 'msg': '更新失败' }
+    - case_name: 无效修改·缺少role_id
+      data:
+        username: testadduser
+        password: tset6789#$123
+        dates: '2023-12-31'
+        phone: 13800000000
+      validation:
+        - contains: { 'status_code': 200 }
+        - contains: { 'msg': '更新失败' }
+    - case_name: 无效修改·缺少phone
+      data:
+        username: testadduser
+        password: tset6789#$123
+        role_id: 89588181111112343
+        dates: '2023-12-31'
+      validation:
+        - contains: { 'status_code': 200 }
+        - contains: { 'msg': '更新失败' }
