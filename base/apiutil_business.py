@@ -116,7 +116,7 @@ class RequestBase(object):
                 validation=json.loads(tc.pop("validation"))
                 #去元素的value，先变成list，再变成str，最后连成list
                 allure_validation=list(str(list(i.values())) for i in validation)
-                allure.attach(allure_validation,"预期结果",allure.attachment_type.TEXT)
+                allure.attach(json.dumps(allure_validation, ensure_ascii=False),"预期结果",allure.attachment_type.TEXT)
                 #处理提取表达式
                 extract=tc.pop('extract',None) #不存在则返回None
                 extract_list=tc.pop("extract_list",None)
