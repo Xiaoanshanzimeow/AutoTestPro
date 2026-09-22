@@ -3,6 +3,11 @@ name: 自动化测试CI
 on:
   push:
   pull_request:
+# 关键：给 Pages 部署开权限（默认 GITHUB_TOKEN 是只读的）
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   test:
@@ -72,13 +77,45 @@ jobs:
           sleep 8
           curl -s http://127.0.0.1:8787/ >/dev/null || { echo 'mock 没起来，打印日志：'; cat mock.log; exit 1; }
 
-      - name: 跑测试
-        run: pytest testcase -v
+      - name: 跑测试（结果写入allure-results）
+        run: pytest testcase -v --alluredir=allure-results
 
-      - name: 上传 Allure 结果
+      - name: 安装JDK（allure是java程序，必须先有jdk）
+        if: always()
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 安装Allure命令行
+        if: always()
+        run: |
+          curl -sSLo /tmp/allure.tgz https://github.com/allure-framework/allure2/releases/download/2.30.0/allure-2.30.0.tgz
+          tar -xzf /tmp/allure.tgz -C "$HOME"
+          echo "$HOME/allure-2.30.0/bin" >> "$GITHUB_PATH"
+
+      - name: 生成Allure HTML报告
+        if: always()
+        run: allure generate allure-results --clean -o allure-report
+
+      - name: 上传 Allure 报告（私有备份，可下载 zip）
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: allure-results
-          path: allure-results/
+          name: allure-report
+          path: allure-report/
           if-no-files-found: ignore
+
+      - name: 配置 GitHub Pages
+        if: always()
+        uses: actions/configure-pages@v5
+
+      - name: 上传报告到 Pages
+        if: always()
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./allure-report
+
+      - name: 部署到 GitHub Pages
+        if: always()
+        uses: actions/deploy-pages@v4
