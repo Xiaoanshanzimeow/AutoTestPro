@@ -77,8 +77,8 @@ jobs:
           sleep 8
           curl -s http://127.0.0.1:8787/ >/dev/null || { echo 'mock 没起来，打印日志：'; cat mock.log; exit 1; }
 
-      - name: 跑测试（结果写入allure-results）
-        run: pytest testcase -v --alluredir=allure-results
+      - name: 跑测试
+        run: pytest testcase -v
 
       - name: 安装JDK（allure是java程序，必须先有jdk）
         if: always()
