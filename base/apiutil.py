@@ -60,7 +60,7 @@ class RequestBase:
             method=base_info['method']
             allure.attach(method, f'请求方法：{method}', allure.attachment_type.TEXT)
             header=self.replace_load(base_info['header'])
-            allure.attach(header, f'请求头：{header}', allure.attachment_type.TEXT)
+            allure.attach(str(header), f'请求头：{header}', allure.attachment_type.TEXT)
             cookie=None
             if base_info.get('cookies') is not None:
                 cookie=self.replace_load(base_info['cookies'])
