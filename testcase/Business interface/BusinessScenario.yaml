@@ -14,6 +14,8 @@
         size: 20
       validation:
         - contains: { 'error_code': '0000' }
+        # 【AI 新增】强断言：验证列表确实返回已知商品，防止 error_code=0000 但列表为空
+        - contains: { 'goodsId': '18382788819' }
       extract_list:
         goodsIds: $.goodsList[*].goodsId
 - baseInfo:
@@ -50,6 +52,8 @@
           { "name": "张三","phone": 13800000000,"address": "北京市海淀区西三环北路74号院4栋3单元1008" }
       validation:
         - eq: { 'message': '提交订单成功' }
+        # 【AI 新增】强断言：补上 error_code 校验（原来只断 message）
+        - eq: { 'error_code': '0000' }
       extract:
         orderNumber: $.orderNumber
         userId: $.userId
@@ -67,6 +71,23 @@
         timeStamp: ${timestamp()}
       validation:
         - eq: { 'message': '订单支付成功' }
+        # 【AI 新增】数据库断言：下单后订单已落库，初始状态 '0'（待支付）
+        - db: "SELECT * FROM orders WHERE order_number='${get_extract_data(orderNumber)}' AND status='0'"
+# ================== 【AI 新增】模拟第三方支付回调 ==================
+- baseInfo:
+    api_name: 模拟支付回调
+    url: /coupApply/cms/payCallback
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 模拟第三方支付成功回调
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        status: '1'
+      validation:
+        - eq: { 'error_code': '0000' }
+# ================== 【AI 新增结束】 ==================
 - baseInfo:
     api_name: 校验订单状态
     url: /coupApply/cms/checkOrderStatus
@@ -79,4 +100,172 @@
         orderNumber: ${get_extract_data(orderNumber)}
         timeStamp: ${timestamp()}
       validation:
-        - eq: { 'status': '0' }
+        - eq: { 'status': '1' }  # 【AI 修改】原写死 '0'，改为断言回调推进后的状态 '1'
+        # 【AI 新增】数据库断言：回调成功后，库中订单状态已推进为 '1'
+        - db: "SELECT * FROM orders WHERE order_number='${get_extract_data(orderNumber)}' AND status='1'"
+
+# ================== 【AI 新增】场景二：支付失败回调 ==================
+# 说明：复用场景一的 goodsIds 与 token，重新提交订单生成新 orderNumber，
+#       回调传 status='2'（失败），校验订单状态推进为 '2'
+- baseInfo:
+    api_name: 提交订单（失败场景）
+    url: /coupApply/cms/placeAnOrder
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 提交订单-失败场景
+      json:
+        goods_id: ${get_extract_data(goodsIds,1)}
+        number: 2
+        propertyChildIds: "2:9"
+        inviter_id: 127839112
+        price: "128"
+        freight_insurance: "0.00"
+        discount_code: "002399"
+        consignee_info:
+          { "name": "张三","phone": 13800000000,"address": "北京市海淀区西三环北路74号院4栋3单元1008" }
+      validation:
+        - eq: { 'message': '提交订单成功' }
+        # 【AI 新增】强断言：补上 error_code 校验（原来只断 message）
+        - eq: { 'error_code': '0000' }
+      extract:
+        orderNumber: $.orderNumber
+        userId: $.userId
+
+- baseInfo:
+    api_name: 订单支付（失败场景）
+    url: /coupApply/cms/orderPay
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 订单支付-失败场景
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        userId: ${get_extract_data(userId)}
+        timeStamp: ${timestamp()}
+      validation:
+        - eq: { 'message': '订单支付成功' }
+
+- baseInfo:
+    api_name: 模拟支付失败回调
+    url: /coupApply/cms/payCallback
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 模拟第三方支付失败回调
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        status: '2'
+      validation:
+        - eq: { 'error_code': '0000' }
+
+- baseInfo:
+    api_name: 校验订单状态（失败）
+    url: /coupApply/cms/checkOrderStatus
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 校验失败回调后的订单状态
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        timeStamp: ${timestamp()}
+      validation:
+        - eq: { 'status': '2' }
+        # 【AI 新增】数据库断言：失败回调后，库中订单状态推进为 '2'
+        - db: "SELECT * FROM orders WHERE order_number='${get_extract_data(orderNumber)}' AND status='2'"
+# ================== 【AI 新增结束】 ==================
+
+# ================== 【AI 新增】场景三：重复回调（幂等） ==================
+# 说明：对同一订单连续回调两次 status='1'，第二次应被幂等拦截（返回"重复回调"），
+#       且订单状态保持不变，仍为 '1'
+- baseInfo:
+    api_name: 提交订单（重复回调场景）
+    url: /coupApply/cms/placeAnOrder
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 提交订单-重复回调场景
+      json:
+        goods_id: ${get_extract_data(goodsIds,1)}
+        number: 2
+        propertyChildIds: "2:9"
+        inviter_id: 127839112
+        price: "128"
+        freight_insurance: "0.00"
+        discount_code: "002399"
+        consignee_info:
+          { "name": "张三","phone": 13800000000,"address": "北京市海淀区西三环北路74号院4栋3单元1008" }
+      validation:
+        - eq: { 'message': '提交订单成功' }
+        # 【AI 新增】强断言：补上 error_code 校验（原来只断 message）
+        - eq: { 'error_code': '0000' }
+      extract:
+        orderNumber: $.orderNumber
+        userId: $.userId
+
+- baseInfo:
+    api_name: 订单支付（重复回调场景）
+    url: /coupApply/cms/orderPay
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 订单支付-重复回调场景
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        userId: ${get_extract_data(userId)}
+        timeStamp: ${timestamp()}
+      validation:
+        - eq: { 'message': '订单支付成功' }
+
+- baseInfo:
+    api_name: 首次支付回调
+    url: /coupApply/cms/payCallback
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 首次支付成功回调
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        status: '1'
+      validation:
+        - eq: { 'error_code': '0000' }
+        - eq: { 'message': '回调处理成功' }
+
+- baseInfo:
+    api_name: 重复支付回调
+    url: /coupApply/cms/payCallback
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 重复支付回调（验证幂等）
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        status: '1'
+      validation:
+        - eq: { 'error_code': '0000' }
+        - contains: { 'message': '重复回调' }
+
+- baseInfo:
+    api_name: 校验订单状态（幂等）
+    url: /coupApply/cms/checkOrderStatus
+    method: post
+    header:
+      Content-Type: application/json;charset=UTF-8
+  testCase:
+    - case_name: 重复回调后状态保持不变
+      json:
+        orderNumber: ${get_extract_data(orderNumber)}
+        timeStamp: ${timestamp()}
+      validation:
+        - eq: { 'status': '1' }
+        # 【AI 新增】数据库断言：幂等拦截后，库中订单状态仍为 '1'（未被覆盖）
+        - db: "SELECT * FROM orders WHERE order_number='${get_extract_data(orderNumber)}' AND status='1'"
+# ================== 【AI 新增结束】 ==================

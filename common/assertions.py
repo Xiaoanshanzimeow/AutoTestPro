@@ -47,10 +47,16 @@ class Assertions:
                 resp_list=jsonpath.jsonpath(response,"$..%s"%assert_key)
                 #$..---全局搜索；在response里面找
                 #去接口返回的 response 里，不管 assert_key（比如 error_code）藏在哪一层，把它所有出现过的值都挖出来，装进一个叫 resp_list 的列表里
+                if not resp_list:
+                    flag+=1
+                    logs.error(f"响应文本断言失败：接口响应中不存在字段【{assert_key}】，实际响应：{response}")
+                    allure.attach(f"预期字段{assert_key}，实际响应{response}", '响应文本断言结果：失败',
+                                  attachment_type=allure.attachment_type.TEXT)
+                    continue
                 if isinstance(resp_list[0],str): #若列表第一个值是字符串
                     resp_list=''.join(resp_list) #则把列表拼接成字符串
                 if resp_list:
-                    assert_value==None if assert_value.upper()=='NONE' else assert_value #如果预期结果是NONE，转化为None
+                    assert_value=None if assert_value.upper()=='NONE' else assert_value #如果预期结果是NONE，转化为None
                     if assert_value in resp_list:
                         logs.info("字符串包含断言成功：预期结果【%s】，实际结果【%s】"%(assert_value,resp_list))
                     else:
@@ -69,9 +75,15 @@ class Assertions:
         """
         flag=0
         if isinstance(actual_results,dict) and isinstance(expected_results,dict):
-            common_keys=list(expected_results.keys()&actual_results.keys())[0]
+            common_keys=expected_results.keys()&actual_results.keys()
             #&---按位与，取交集，返回的是集合
-            new_actual_results={common_keys:actual_results[common_keys]}
+            if not common_keys:
+                flag+=1
+                logs.error(f"相等断言失败，预期字段{list(expected_results.keys())}在接口响应中不存在，实际响应:{actual_results}")
+                allure.attach(f"预期结果：{expected_results}\n实际结果：{actual_results}",'相等断言结果：失败',attachment_type=allure.attachment_type.TEXT)
+                return flag
+            common_key=list(common_keys)[0]
+            new_actual_results={common_key:actual_results[common_key]}
             eq_assert=operator.eq(new_actual_results,expected_results)
             if eq_assert:
                 logs.info(f"相等断言成功：接口实际结果：{new_actual_results}，等于预期结果：{expected_results}")
@@ -95,13 +107,19 @@ class Assertions:
         """
         flag = 0
         if isinstance(actual_results, dict) and isinstance(expected_results, dict):
-            common_keys = list(expected_results.keys() & actual_results.keys())[0]
+            common_keys = expected_results.keys() & actual_results.keys()
             # &---按位与，取交集，返回的是集合
-            new_actual_results = {common_keys: actual_results[common_keys]}
+            if not common_keys:
+                flag+=1
+                logs.error(f"不相等断言失败，预期字段{list(expected_results.keys())}在接口响应中不存在，实际响应:{actual_results}")
+                allure.attach(f"预期结果：{expected_results}\n实际结果：{actual_results}",'不相等断言结果：失败',attachment_type=allure.attachment_type.TEXT)
+                return flag
+            common_key=list(common_keys)[0]
+            new_actual_results = {common_key: actual_results[common_key]}
             eq_assert = operator.ne(new_actual_results, expected_results)
             if eq_assert:
                 logs.info(f"不相等断言成功：接口实际结果：{new_actual_results}，不等于预期结果：{expected_results}")
-                allure.attach(f"预期结果：{new_actual_results}\n实际结果：{expected_results}", '相等断言结果：成功',
+                allure.attach(f"预期结果：{new_actual_results}\n实际结果：{expected_results}", '不相等断言结果：成功',
                               attachment_type=allure.attachment_type.TEXT)
             else:
                 flag += 1
@@ -135,6 +153,7 @@ class Assertions:
             raise
         return flag
 
+    # 【预留·未接线】响应时间断言：assert_result 目前未分发到它
     def assert_response_time(self,res_time,exp_time):
         """
         通过断言接口的响应时间和期望时间对比，小于期望时间则为通过
@@ -152,17 +171,21 @@ class Assertions:
     def assert_mysql_data(self,expected_results):
         """
         数据库断言
-        :param expected_results: 预期结果，yaml文件的SQL语句
+        :param expected_results: 预期结果，yaml文件的SQL语句（能查到数据即通过）
         :return:
         """
         flag=0
-        conn=ConnectMysql()
-        db_value=conn.query_all(expected_results) #在数据库中执行此语句，查到了则返回列表
-        if db_value is not None:
-            logs.info("数据库断言成功")
-        else:
+        try:
+            conn=ConnectMysql()
+            db_value=conn.query_all(expected_results) #在数据库中执行此语句，查到了则返回列表
+            if db_value is not None:
+                logs.info("数据库断言成功，查到数据：%s" % expected_results)
+            else:
+                flag+=1
+                logs.error("数据库断言失败，未查到符合条件的数据：%s" % expected_results)
+        except Exception as e:
             flag+=1
-            logs.error("数据库断言失败，请检查数据库是否存在该数据")
+            logs.error("数据库断言失败，连接或查询异常：%s" % e)
         return flag
 
     def assert_result(self,expected,response,status_code):

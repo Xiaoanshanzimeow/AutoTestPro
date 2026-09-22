@@ -15,6 +15,9 @@ ConnectSSH	           [SSH]	    上服务器拉取后端日志，排查 500 错�
 断言 HTTP 返回码（200）。
 用 ConnectMysql().query_all("SELECT * FROM orders WHERE id=1") 查数据库，断言订单状态是“已支付”。
 如果失败，用 ConnectSSH().get_ssh_content() 拉日志出来看。
+
+【预留说明】下表 5 类里目前只有 ConnectMysql 真正接线（数据库断言在用），
+其余 Redis/ClickHouse/Mongo/SSH 及文件里的 ConnectOracle 都是「预留能力」，接真实后端时直接启用。
 """
 import traceback
 
@@ -29,7 +32,7 @@ from clickhouse_sqlalchemy import make_session
 from sqlalchemy import create_engine
 from conf.operationConfig import OperationConfig
 from common.recordlog import logs
-from common.two_dimension_data import print_table
+from common.two_dimension_data import print_table  # 【预留】当前未调用
 
 conf = OperationConfig() #全局配置，读取config.ini里的数据库账号密码
 
@@ -69,29 +72,12 @@ class ConnectMysql:
             self.cursor.execute(sql)
             self.conn.commit()
             res = self.cursor.fetchall()
-
-            keys = ''
-            values = []
-            for item in res:
-                keys = list(item.keys())
-
-            for ite in res:
-                values.append(list(ite.values()))
-
-            for val in values:
-                # lst_format = [
-                #     keys,
-                #     val
-                # ]
-                lst_format = [
-                    val
-                ]
-
-                return lst_format
-                # return print_table(lst_format)
-
+            if not res:
+                return None
+            return res  # 返回所有行（每行是 DictCursor 给出的 dict）
         except Exception as e:
             logs.error(e)
+            return None
         finally:
             self.close()
 
@@ -106,6 +92,7 @@ class ConnectMysql:
             self.close()
 
 
+# 【预留·未接线】Redis 连接：查缓存/验证码/登录态，当前测试未使用，接真实缓存断言时启用
 class ConnectRedis:
 
     def __init__(self, ip=conf.get_section_redis("host"), port=conf.get_section_redis("port"), username=None,
@@ -166,6 +153,7 @@ class ConnectRedis:
             logs.error(str(traceback.format_exc()))
 
 
+# 【预留·未接线】ClickHouse 连接：查大数据分析库，当前测试未使用
 class ConnectClickHouse:
     """
     clickhouse有两个端口，8123和9000,分别用于接收 http协议和tcp协议请求，管理后台登录用的8123(jdbc连接)，
@@ -214,6 +202,7 @@ class ConnectClickHouse:
             self.session.close()
 
 
+# 【预留·未接线】MongoDB 连接：查非结构化数据，当前测试未使用
 class ConnectMongo(object):
 
     def __init__(self):
@@ -344,6 +333,7 @@ class ConnectMongo(object):
             return None
 
 
+# 【预留·未接线】SSH 连接：上服务器拉后端日志，当前测试未使用
 class ConnectSSH(object):
     """连接SSH终端服务"""
 
@@ -375,6 +365,7 @@ class ConnectSSH(object):
         return content
 
 
+# 【预留·未接线】Oracle 连接：空壳占位，当前测试未使用
 class ConnectOracle:
     def __init__(self):
         pass

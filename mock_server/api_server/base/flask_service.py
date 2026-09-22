@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import datetime
 import string
+import threading
 import time
 from hashlib import sha1
 from flask_jwt_extended import create_access_token
@@ -16,13 +17,14 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, '..'))
 
 sys.path.append(project_root)
-from confs.setting import DIR_BASE  # noqa: E402
+from confs.setting import DIR_BASE, MYSQL_CONFIG  # noqa: E402
 
 import flask  # noqa: E402
 import json  # noqa: E402
 import random  # noqa: E402
 from flask import jsonify, make_response, request  # noqa: E402
 from functools import wraps  # noqa: E402
+import pymysql  # noqa: E402
 
 """
 mock接口服务
@@ -36,6 +38,7 @@ api.config.from_object(__name__)
 api.config['JSON_AS_ASCII'] = False
 
 global_params = {}
+order_lock=threading.Lock()
 
 api.config["JWT_SECRET_KEY"] = "super-secret"
 jwt = JWTManager(api)
@@ -153,6 +156,8 @@ def user_login():
     token = ''.join([random.choice(string.hexdigits) for i in range(29)])
     # user_id = ''.join([random.choice(string.digits) for i in range(19)])
     global_params['token'] = token
+    # 【AI 修改】把每次登录发放的 token 记进列表，并发下多个 token 同时有效# 【AI 修改】把每次登录发放的 token 记进列表，并发下多个 token 同时有效
+    global_params.setdefault('tokens',[]).append(token)
     # 设置cookie在请求头
     acc_token = create_access_token(identity='example_user')
     if all([user_name, passwd]):
@@ -177,15 +182,15 @@ def user_login():
 @api.route('/dar/user/addUser', methods=['post'])
 def add_user():
     """新增用户接口"""
-    get_token = {'token': global_params['token']}
+
     username = flask.request.form.get('username')
     password = flask.request.form.get('password')
     role_id = flask.request.form.get('role_id')
     dates = flask.request.form.get('dates')
     phone = flask.request.form.get('phone')
     token = flask.request.form.get('token')
-    if all([username, password, role_id, dates, phone]) and token == get_token['token']:
-        with open('../data/mockdata/userManage.json', 'a', encoding='utf-8') as f:
+    if all([username, password, role_id, dates, phone]) and token in global_params.get('tokens',[]):
+        with open(os.path.join(DIR_BASE, 'data', 'mockdata', 'userManage.json'), 'a', encoding='utf-8') as f:
             add_user_info = {
                 'id': ''.join([random.choice(string.digits) for i in range(11)]),
                 'username': username,
@@ -468,6 +473,28 @@ def delete_cart():
             return jsonify({'error': '参数错误或缺少必填参数', 'error_code': '9001'})
 
 
+def _mysql_exec(sql, params=None):
+    """【AI 新增】执行 INSERT/UPDATE 写库，模拟真实后端把订单数据落库。
+
+    单独 try/except 包裹：MySQL 没启动或配置错误时只打印日志，
+    不影响接口正常返回，保证原有 JSON 文件流程仍然可用。
+    """
+    try:
+        conn = pymysql.connect(host=MYSQL_CONFIG['host'],
+                               port=MYSQL_CONFIG['port'],
+                               user=MYSQL_CONFIG['user'],
+                               password=MYSQL_CONFIG['password'],
+                               database=MYSQL_CONFIG['database'],
+                               charset='utf8')
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print('[mock] 数据库写入失败，已忽略（请检查 MySQL 是否启动/配置是否正确）：%s' % e)
+
+
 @api.route('/coupApply/cms/placeAnOrder', methods=['post'])
 def place_an_order():
     """商品下单接口--提交订单"""
@@ -496,9 +523,13 @@ def place_an_order():
     if all([goods_id, number, propertyChildIds, inviter_id, price, freight_insurance, discount_code]):
         if goods_id in good_id_list:
             order_num = ''.join([random.choice(string.digits) for i in range(21)])
-
-            write_data(DIR_BASE + '/data/mockdata/orderNumber.json', json.dumps({'order_num': order_num,
-                                                                                 'user_id': user_id}))
+            with order_lock:
+                orders=_read_orders()
+                orders[order_num]=user_id
+                write_data(DIR_BASE+'/data/mockdata/orderNumber.json',json.dumps(orders))
+            # 【AI 新增】订单落库：初始状态 '0'（待支付），支付回调后再更新为 '1'/'2'
+            _mysql_exec("INSERT INTO orders(order_number, user_id, status) VALUES (%s, %s, %s)",
+                        (order_num, user_id, '0'))
             response = {
                 'orderNumber': order_num,
                 'userId': user_id,
@@ -550,14 +581,12 @@ def check_shopping_inventory():
 @api.route('/coupApply/cms/orderPay', methods=['post'])
 def order_pay():
     """订单支付"""
-    data = read_data(DIR_BASE + '/data/mockdata/orderNumber.json')
-    order_num_json = json.loads(data).get('order_num')
-    user_id_json = json.loads(data).get('user_id')
+    orders = _read_orders()  # {order_number: user_id}
     order_num = request.json.get('orderNumber')
     user_id = request.json.get('userId')
     time_stamp = request.json.get('timeStamp')
     if all([order_num, user_id]):
-        if order_num == order_num_json and user_id == user_id_json:
+        if orders.get(order_num) == user_id:
             response = {
                 'createTime': now_date(),
                 'error': '',
@@ -572,15 +601,80 @@ def order_pay():
         return jsonify({'msg': '参数错误', 'error_code': '9001'})
 
 
+# ============================================================
+# 【AI 新增】支付回调接口：模拟第三方支付平台异步回调，
+# 将订单状态写入 orderStatus.json，供 checkOrderStatus 读取
+# ============================================================
+
+def _read_orders():
+    """【AI 修改】读取订单表文件（orderNumber.json，结构 {order_number: user_id}）。
+          文件不存在或格式异常时返回空 dict，避免并发下单互相覆盖。
+    """
+    try:
+        return json.loads(read_data(DIR_BASE + '/data/mockdata/orderNumber.json'))
+    except Exception:
+        return {}
+def _read_order_status():
+    """【AI 新增】读取订单回调状态，文件不存在或格式异常时返回 None
+
+    用于幂等判断：支付回调可能因第三方网络重试而对同一订单重复调用，
+    需要先读当前状态判断该订单是否已被处理过。
+    """
+    try:
+        return json.loads(read_data(DIR_BASE + '/data/mockdata/orderStatus.json'))
+    except Exception:
+        return None
+
+
+@api.route('/coupApply/cms/payCallback', methods=['post'])
+def pay_callback():
+    """模拟第三方支付回调，写入订单状态（'1'=成功，'2'=失败）
+
+    【AI 新增】幂等处理：同一订单若已回调过（状态为最终态 '1'/'2'），
+    则本次回调直接忽略、不再重复写入，避免重复回调导致状态被反复覆盖。
+    """
+    order_num = request.json.get('orderNumber')
+    status = request.json.get('status')
+    # all(iterable)：接收这个列表，仅当列表中所有元素的布尔值都为 True 时，才返回 True；只要有一个为 False，就返回 False
+    if not all([order_num, status]):
+        return jsonify({'error_code': '9001', 'message': '参数错误或缺少必填参数'})
+
+    # 幂等判断：该订单已处于最终态，视为重复回调，直接忽略
+    with order_lock:
+        status_map = _read_order_status() or {}  # {order_number: status}
+        if status_map.get(order_num) in ('1', '2'):
+            return jsonify({'error_code': '0000', 'message': '重复回调，已忽略',
+                            'translate_language': 'zh-CN'})
+
+        # 【AI 修改】状态按 orderNumber 做 key 追加，不再整文件覆盖
+        status_map[order_num] = status
+        write_data(DIR_BASE + '/data/mockdata/orderStatus.json', json.dumps(status_map))
+    # 【AI 新增】回调推进订单状态：把数据库里该订单的状态同步为回调结果
+    _mysql_exec("UPDATE orders SET status=%s WHERE order_number=%s", (status, order_num))
+    return jsonify({'error_code': '0000', 'message': '回调处理成功',
+                    'translate_language': 'zh-CN'})
+# ============================================================
+# 【AI 新增结束】
+# ============================================================
+
+
 @api.route('/coupApply/cms/checkOrderStatus', methods=['post'])
 def check_order_status():
     """校验商品订单状态"""
-    data = eval(read_data(DIR_BASE + '/data/mockdata/orderNumber.json'))
-    order_num = data.get('order_num')
+    orders = _read_orders()  # {order_number: user_id}
     order_number = request.json.get('orderNumber')
-    if order_number == order_num:
+    if order_number in orders:
+        # ===== 【AI 修改】状态不再写死 '0'，改为读取支付回调写入的 orderStatus.json =====
+        status = '0'  # 默认：尚未回调 / 待支付
+        try:
+            status_map = _read_order_status() or {}  # {order_number: status}
+            status = status_map.get(order_number, '0')
+        except Exception:
+            # 状态文件不存在或格式异常时，按「未回调」处理，返回默认状态
+            status = '0'
+        # ===== 【AI 修改结束】 =====
         response = {
-            'status': '0',
+            'status': status,
             'queryTime': now_date(),
             'error': '',
             'error_code': '',
@@ -594,10 +688,9 @@ def check_order_status():
 @api.route('/coupApply/cms/checkLogisticsStatus', methods=['post'])
 def check_logistics_status():
     """校验商品物流状态"""
-    data = eval(read_data(DIR_BASE + '/data/mockdata/orderNumber.json'))
-    order_num = data.get('order_num')
+    orders = _read_orders()  # {order_number: user_id}
     order_number = request.json.get('orderNumber')
-    if order_number == order_num:
+    if order_number in orders:
         response = {
             'status': '1',
             'queryTime': now_date(),

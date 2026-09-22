@@ -3,7 +3,7 @@
 测试模块和测试用例生成带有序号前缀的编号，保证allure报告中的展示顺序和pytest实际执行顺序一致
 """
 def generate_module_id():
-    for i in range(1.1000):
+    for i in range(1,1000):
         module_id='M'+str(i).zfill(2)+'_'
         yield module_id
 

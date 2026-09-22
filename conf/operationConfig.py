@@ -2,12 +2,21 @@
 import sys #负责异常报错
 import traceback #把错误变成字符串写进日志文件
 import configparser #解析.ini配置文件
+import os ##读环境变量：数据库密码等敏感信息从 .env 读，不写死在代码/ini里
 from conf import setting #使operationConfig.py知道config.ini具体放在哪个位置
 from common.recordlog import logs #导入日志记录器，出错可以记录到日志
 
 class OperationConfig:
     """封装读取.ini配置文件模块"""
 
+    # 脱敏映射：(章节, 选项) -> 环境变量名
+    # 这些值优先从 .env（环境变量）读，config.ini 里的明文只当兜底
+    _SECRET_ENV={
+        ('MYSQL','host') : 'DB_HOST',
+        ('MYSQL','username') : 'DB_USER',
+        ('MYSQL', 'password'): 'DB_PASSWORD',
+        ('MYSQL', 'database'): 'DB_DATABASE',
+    }
     def __init__(self,filepath=None):
         #1.决定读取文件
         if filepath is None:
@@ -43,6 +52,13 @@ class OperationConfig:
         :param option: 头部值下面的选项
         :return:
         """
+        ##1.敏感项优先读环境变量（.env），脱敏生效
+        env_name=self._SECRET_ENV.get((section,option))
+        if env_name:
+            env_value=os.getenv(env_name)
+            if env_value: # 环境变量里有值就用它
+                return env_value
+        # 2.没配环境变量时，兜底读 config.ini
         try:
             values=self.conf.get(section,option)#批量取数用这个value=self.get_item_value(section).get(option)
             return values #返回字符串

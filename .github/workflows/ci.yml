@@ -1,0 +1,84 @@
+name: 自动化测试CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ${{secrets.DB_PASSWORD}}
+          MYSQL_DATABASE: zqsjfx
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 安装Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+      - name: 生成.env（密码从Github Secret注入，不进仓库）
+        run: |
+          cat > .env <<'EOF'
+          DB_HOST=127.0.0.1
+          DB_USER=root
+          DB_PASSWORD=${{secrets.DB_PASSWORD}}
+          DB_DATABASE=zqsjfx
+          EOF
+      - name: 等待MySQL就绪并建orders表
+        env:
+          DB_PASSWORD: ${{secrets.DB_PASSWORD}}
+        run: |
+          python - <<'PY'
+          import time,os
+          import pymysql
+          for i in range(30):
+              try:
+                  conn=pymysql.connect(host='127.0.0.1',user='root',password=os.environ['DB_PASSWORD'],database='zqsjfx')
+                  cur = conn.cursor()
+                  cur.execute("""CREATE TABLE IF NOT EXISTS orders (
+                      order_number VARCHAR(64) PRIMARY KEY,
+                      user_id      VARCHAR(64),
+                      status       VARCHAR(8)
+                  )""")
+                  conn.commit()
+                  print('MySQL 就绪，orders 表已建好')
+                  break
+              except Exception as e:
+                  print(f'等待 MySQL... {e}')
+                  time.sleep(2)
+          else:
+              raise SystemExit('MySQL 30 次都没就绪')
+          PY
+
+      - name: 启动 mock 服务
+        run: |
+          nohup python mock_server/api_server/base/flask_service.py > mock.log 2>&1 &
+          sleep 8
+          curl -s http://127.0.0.1:8787/ >/dev/null || { echo 'mock 没起来，打印日志：'; cat mock.log; exit 1; }
+
+      - name: 跑测试
+        run: pytest testcase -v
+
+      - name: 上传 Allure 结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results
+          path: allure-results/
+          if-no-files-found: ignore

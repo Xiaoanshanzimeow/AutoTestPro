@@ -1,9 +1,13 @@
 import logging
 import os
 import sys
+from dotenv import load_dotenv
 
 DIR_BASE = os.path.dirname(os.path.dirname(__file__))
 sys.path.append(DIR_BASE)
+
+PROJECT_ROOT=os.path.dirname(os.path.dirname(DIR_BASE))
+load_dotenv(os.path.join(PROJECT_ROOT, '.env'))
 
 # log日志输出级别
 LOG_LEVEL = logging.DEBUG  # 文件
@@ -40,4 +44,14 @@ LOGIN_HEADER = {
     'Accept': 'application/json, text/plain, */*',
     'Accept-Language': 'zh-CN,zh;q=0.9',
     'Connection': 'keep-alive'
+}
+
+# MySQL 数据库配置（mock 模拟真实后端：下单/回调时落库）
+# 与 test 侧 conf/config.ini 的 [MYSQL] 保持一致，指向同一个库
+MYSQL_CONFIG = {
+    'host': os.getenv('DB_HOST','127.0.0.1'),
+    'port': 3306,
+    'user': os.getenv('DB_USER','root'),
+    'password': os.getenv('DB_PASSWORD'),
+    'database': os.getenv('DB_DATABASE','zqsjfx'),
 }

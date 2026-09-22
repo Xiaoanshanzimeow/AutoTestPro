@@ -14,7 +14,7 @@ def get_testcase_yaml(file): #传入yaml文件名
             data=yaml.safe_load(f)
             if len(data) <=1:
                 yam_data=data[0]
-                base_info=yam_data.get('baseInfo')
+                base_info=yam_data.get('baseInfo') or yam_data.get('base_info')
                 for ts in yam_data.get('testCase'):
                     param=[base_info,ts] #把不变的base_info和会变化可能有多个的testcase分离
                     testcase_list.append(param)
@@ -106,7 +106,7 @@ class ReadYamlData:
         try:
             with open(FILE_PATH['EXTRACT'],'r',encoding='utf-8') as rf:
                 ext_data=yaml.safe_load(rf)
-                if second_node_name is not None:
+                if second_node_name is None:
                     return ext_data[node_name]
                 else:
                     return ext_data[node_name][second_node_name]

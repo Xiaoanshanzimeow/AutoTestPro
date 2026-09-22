@@ -38,32 +38,18 @@ class RequestBase(object):
         #后续查找替换是在字符串的基础上
         if not isinstance(data,str):
             str_data=json.dumps(data,ensure_ascii=False) #如果不是字符串，就转成json字符串
-        for i in range(str_data.count("${")):
-            if "${" in str_data and "}" in str_data: #检查是否还有
-                #.index()---找出现的起始位置，找不到抛异常
-                start_index=str_data.index("$") #占位符起始位置
-                end_index=str_data.index("}",start_index) #从start_index开始找，找第一个出现的}
-                #提取完整的占位符，这个字符串就是要替换的内容
-                ref_all_params=str_data[start_index:end_index+1] #sl[a:b]--在sl里面截一段内容（左闭右开）
-                #提取函数名,例如${get_yaml_data(name)} → 函数名是 get_yaml_data
-                func_name=ref_all_params[2:ref_all_params.index("(")]
-                #提取函数参数
-                func_params=ref_all_params[ref_all_params.index("(")+1:ref_all_params.index(")")]
-                #调用函数---python的反射机制（getattr）
-                #1）getattr(对象，“方法名”)，获取该对象的上的该方法，如：getattr(DebugTalk(), "get_yaml_data") 就会拿到 get_yaml_data 这个方法
-                #2）func_params.split(',')，按逗号切割参数字符串变成列表，如：func_params = "name,age" → ["name", "age"]
-                #3）*把列表展开，作为多位置传参给函数
-                #4）如果func_params不为空就执行，为空则传""
-                """
-                '分隔符'.join(list)---列表->字符串--用分隔符把序列里的元素拼接成字符串
-                .split('分隔符')---字符串->列表--把字符串按分隔符号分割成一个个元素返回列表
-                """
-                extract_data=getattr(DebugTalk(),func_name)(*func_params.split(',') if func_params else "")
-                #处理返回值为列表的情况---str.replace要求替换内容为字符串类型
-                if extract_data and isinstance(extract_data,list):
-                    extract_data=','.join(extract_data)
-                #替换占位符---str.replace(旧内容,新内容,替换次数)
-                str_data=str_data.replace(ref_all_params,str(extract_data))
+        # 正则一次性匹配所有 ${...}，替代原 str.index('$') 解析：
+        # 原写法会被字符串里的普通 $ 干扰、也无法处理嵌套占位符
+        pattern = re.compile(r'\$\{([^{}]*)\}')
+        def _sub(match):
+            ref_all_params = match.group(1)  # 占位符内部，如 "get_extract_data(orderNumber)"
+            func_name = ref_all_params[:ref_all_params.index('(')]
+            func_params = ref_all_params[ref_all_params.index('(')+1:ref_all_params.index(')')]
+            extract_data = getattr(DebugTalk(), func_name)(*func_params.split(',') if func_params else "")
+            if extract_data and isinstance(extract_data, list):
+                extract_data = ','.join(extract_data)
+            return str(extract_data)
+        str_data = pattern.sub(_sub, str_data)
 
         #还原数据
         #1）若最开始传入的data是字典，则要把替换后的字符串转回字典
@@ -119,6 +105,7 @@ class RequestBase(object):
                 pass
             #遍历测试用例列表
             for tc in case_info["testCase"]:
+                tc=tc.copy()
                 # 从测试用例里面取出case_name，剩下纯粹为请求参数
                 case_name=tc.pop("case_name") #.pop()---删除键值对，返回value
                 allure.attach(case_name,f'测试用例名称：{case_name}',allure.attachment_type.TEXT)
@@ -126,13 +113,13 @@ class RequestBase(object):
                 val=self.replace_load(tc.get("validation"))
                 tc["validation"]=val
                 #因为yaml文件里的validation指向的value很可能是字符串---s = "[{'eq': ['code', 0]}, {'eq': ['msg', 'success']}]"，需要转化成列表，逐条执行断言
-                validation=eval(tc.pop("validation"))
+                validation=json.loads(tc.pop("validation"))
                 #去元素的value，先变成list，再变成str，最后连成list
                 allure_validation=list(str(list(i.values())) for i in validation)
                 allure.attach(allure_validation,"预期结果",allure.attachment_type.TEXT)
                 #处理提取表达式
                 extract=tc.pop('extract',None) #不存在则返回None
-                extract_lst=tc.pop("extract_lst",None)
+                extract_list=tc.pop("extract_list",None)
 
                 #循环处理请求参数字段
                 #遍历tc剩余键值对
@@ -168,8 +155,8 @@ class RequestBase(object):
                     res_json=json.loads(res_text)
                     if extract is not None:
                         self.extract_data(extract,res_text)
-                    if extract_lst is not None:
-                        self.extract_data_lst(extract, res_text)
+                    if extract_list is not None:
+                        self.extract_data_list(extract_list, res_text)
                     #处理断言
                     assert_res.assert_result(validation,res_json,status_code)
                 except JSONDecodeError as js: #响应不是合法 JSON
@@ -186,7 +173,7 @@ class RequestBase(object):
     #res.text---响应体原始文本内容；res.json()---响应体是json格式，转化为python对象
     def allure_attach_response(cls,response):
         if isinstance(response,dict):
-            allure_response=json.dumps(response,ensure_asxii=False,indent=4) #转为json字符串
+            allure_response=json.dumps(response,ensure_ascii=False,indent=4) #转为json字符串
         else:
             allure_response=response
         return allure_response
@@ -255,6 +242,6 @@ class RequestBase(object):
 1.2替换占位符时候，必须是str类型才可以用replace，所以先用json.dumps()转换成字符串 #39#40
 1.3最后再换回原类型 #70#71
 2.specification_yaml()
-2.1因为replace_load()只还原字典，其余全返回字符串，，而validation的value是列表，所以用eval()强行转换回list #129
+2.1因为replace_load()只还原字典，其余全返回字符串，而validation的value是列表，所以用json.loads()把json字符串安全转回list（原来用eval()，有代码执行风险） #115
 2.2res.text是字符串（服务器返回的原始文本），想要拿他断言、取值，必须先转成dict #168
 """

@@ -25,19 +25,23 @@ class RequestBase:
         str_data=data
         if not isinstance(str_data,str):
             str_data=json.dumps(data,ensure_ascii=False)
-        for i in range(str_data.count("${")):
-            if "${" in str_data and "}" in str_data:
-                start_index=str_data.index("$")
-                end_index=str_data.index('}',start_index)
-                ref_all_params=str_data[start_index:end_index+1]
-                func_name=ref_all_params[2:ref_all_params.index('(')]
-                func_params=ref_all_params[ref_all_params.index('(')+1:ref_all_params.index(')')]
-                extract_data=getattr(DebugTalk,func_name)(*func_params.split(',') if func_params else '')
-                if extract_data and isinstance(extract_data,list):
-                    extract_data=','.join(extract_data)
-                str_data=str_data.replace(ref_all_params,str(extract_data))
+        # 正则一次性匹配所有 ${...}，替代原 str.index('$') 解析：
+        # 原写法会被字符串里的普通 $ 干扰、也无法处理嵌套占位符
+        pattern = re.compile(r'\$\{([^{}]*)\}')
+        #( )：捕获组。只有被括号包起来的内容才会被 match.group(1) 提取出来；[^{}]：定义了一个否定字符类。意思是匹配 “除了 { 和 } 之外” 的任意字符。
+        def _sub(match):
+            ref_all_params = match.group(1)  # 占位符内部，如 "get_extract_data(orderNumber)"
+            func_name = ref_all_params[:ref_all_params.index('(')]
+            func_params = ref_all_params[ref_all_params.index('(')+1:ref_all_params.index(')')]
+            extract_data = getattr(DebugTalk(), func_name)(*func_params.split(',') if func_params else '')
+            if extract_data and isinstance(extract_data, list):
+                extract_data = ','.join(extract_data)
+            return str(extract_data)
+        str_data = pattern.sub(_sub, str_data) #pattern.sub(替换规则, 目标字符串)
 
-        if data and isinstance(data,list):
+
+
+        if data and isinstance(data,dict):
             data=json.loads(str_data)
         else:
             data=str_data
@@ -45,6 +49,7 @@ class RequestBase:
         return data
 
     def specification_yaml(self,base_info,test_case):
+        test_case=test_case.copy()
         try:
             params_type=['json','data','params']
             url_host=self.conf.get_section_for_data("api_envi",'host')
@@ -58,12 +63,12 @@ class RequestBase:
             allure.attach(header, f'请求头：{header}', allure.attachment_type.TEXT)
             cookie=None
             if base_info.get('cookies') is not None:
-                cookies=self.replace_load(base_info['cookies'])
+                cookie=self.replace_load(base_info['cookies'])
             case_name=test_case.pop('case_name')
             allure.attach(case_name, f'测试用例名称：{case_name}', allure.attachment_type.TEXT)
             val=self.replace_load(test_case['validation'])
             test_case['validation']=val
-            validation=eval(test_case.pop('validation'))
+            validation=json.loads(test_case.pop('validation'))
             extract=test_case.pop('extract',None)
             extract_list=test_case.pop('extract_list',None)
             for key,value in test_case.items():
@@ -79,11 +84,10 @@ class RequestBase:
                 name=api_name,
                 url=url,
                 case_name=case_name,
-                headers=header,
+                header=header,
                 method=method,
-                cookies=cookies,
+                cookies=cookie,
                 file=files,
-                cookie=cookies,
                 **test_case
             )
 

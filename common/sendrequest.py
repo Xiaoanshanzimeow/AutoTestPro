@@ -157,7 +157,7 @@ class SendRequest:
             url=url,
             headers=header,
             cookies=cookies,
-            file=file,
+            files=file,
             timeout=setting.API_TIMEOUT,
             verify=False,
             **kwargs)

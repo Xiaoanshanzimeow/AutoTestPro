@@ -2,13 +2,20 @@
 import logging #日志记录模块
 import os #调用底层操作系统功能的方法
 import sys #管理 Python 程序运行时的环境
+from dotenv import load_dotenv
 
 #__file__：代表当前这个脚本文件的绝对路径
 #os.path.dirname(__file__)：取当前文件的上一层目录
 DIR_BASE=os.path.dirname(os.path.dirname(__file__))
+load_dotenv(os.path.join(DIR_BASE,'.env'))
 #没有这行代码：Python 只认当前文件夹，找不到平级或上级的兄弟文件夹。
 #有了这行代码：你把项目根目录强行塞进了 Python 的“搜索清单”里，从此项目里任何地方的模块，Python 都能顺着根目录找到。
+
+#- load_dotenv() 不带参数时，是从"你当前敲命令的目录"开始往上找 .env，依赖你从哪个目录启动。
+#- 带路径 os.path.join(DIR_BASE, '.env') = 直接锁定"项目根目录下的 .env"，不管你从哪个目录启动都能找到，更稳。
+
 sys.path.append(DIR_BASE)
+#把某个目录临时加到 Python 的模块搜索路径里，这样 import 就能找到那个目录下的 .py 文件了。
 
 #log日志输出级别
 """
@@ -40,6 +47,10 @@ REPORT_TYPE='allure'
 #是否发送钉钉消息
 dd_msg=False
 
+# 【并发隔离】xdist 给每个 worker 进程设置环境变量 PYTEST_XDIST_WORKER（gw0/gw1/...）
+# 用它让每个 worker 读写自己的 extract 文件，避免多进程并发读写同一个 extract.yaml 串数据
+_XDIST_WORKER=os.environ.get('PYTEST_XDIST_WORKER','')
+_EXTRACT_FILE=f'extract_{_XDIST_WORKER}.yaml' if _XDIST_WORKER else 'extract.yaml'
 #文件路径
 FILE_PATH={
     'CONFIG':os.path.join(DIR_BASE,'conf/config.ini'), #conf/operationConfig.py用到
@@ -47,7 +58,7 @@ FILE_PATH={
     'YAML':os.path.join(DIR_BASE),
     'TEMP':os.path.join(DIR_BASE,'report/temp'),
     'TMR':os.path.join(DIR_BASE,'report/tmreport'),
-    'EXTRACT':os.path.join(DIR_BASE,'extract.yaml'),
+    'EXTRACT':os.path.join(DIR_BASE,_EXTRACT_FILE),
     'XML':os.path.join(DIR_BASE,'data/sql'),
     'RESULTXML':os.path.join(DIR_BASE,'report'),
     'EXCEL':os.path.join(DIR_BASE,'data','测试数据.xls')

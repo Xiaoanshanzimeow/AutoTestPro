@@ -1,9 +1,9 @@
-- base_info:
+- baseInfo:
     api_name: 用户登录
     url: /dar/user/login
     method: POST
     header:
-      Content-Type: application/x-www-from-urlencoded;chardet=UTF-8
+      Content-Type: application/x-www-form-urlencoded;charset=UTF-8
   testCase:
     - case_name: 用户名和密码正确登陆验证
       data:
