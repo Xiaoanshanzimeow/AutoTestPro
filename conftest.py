@@ -27,7 +27,7 @@ def generate_test_summary(terminalreporter):
     failed = len(terminalreporter.stats.get('failed', []))
     error = len(terminalreporter.stats.get('error', []))
     skipped = len(terminalreporter.stats.get('skipped', []))
-    # 【AI 修改】xdist 下 master 进程不参与收集，_numcollected 恒为 0，
+    # xdist 下 master 进程不参与收集，_numcollected 恒为 0，
     # 改用各结果状态数量之和（通过+失败+错误+跳过=收集到的用例总数）
     total = passed + failed + error + skipped
     duration = time.time() - _START

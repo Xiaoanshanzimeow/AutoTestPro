@@ -26,7 +26,6 @@ def system_login():
 def datadb_init():
     """
     会话级前置：清空订单表，保证每次从干净状态跑（db 断言依赖干净数据）
-    【AI 修改】原为空壳 pass，现补上数据清理逻辑
     """
     try:
         ConnectMysql().delete("DELETE FROM orders")

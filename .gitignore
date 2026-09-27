@@ -18,8 +18,8 @@ env/
 *.iml
 
 # ===== 运行时产物（跑测试时自动生成，不需要进 git） =====
-# 全局参数缓存池，存登录 token 等敏感数据，绝不能传
-extract.yaml
+# 全局参数缓存池，存登录 token 等敏感数据，绝不能传（含 xdist 并发下的 extract_gw*.yaml）
+extract*.yaml
 # 日志
 logs/
 # allure 测试报告

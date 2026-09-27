@@ -12,5 +12,18 @@
       validation:
         - contains: {'error_code': none}
         - eq: {'msg': '登录成功'}
+        - schema:
+            type: object
+            required: [msg,msg_code,error_code,token]
+            properties:
+              msg:
+                type: string
+              msg_code:
+                type: integer
+              error_code:
+                type: 'null'
+                #YAML 把 null 解析成了 Python 的 None，而 schema 要求 type 的值必须是字符串。所以必须加引号写成 type: 'null'，强制它当字符串。
+              token:
+                type: string
       extract:
         token: $.token

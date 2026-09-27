@@ -156,7 +156,7 @@ def user_login():
     token = ''.join([random.choice(string.hexdigits) for i in range(29)])
     # user_id = ''.join([random.choice(string.digits) for i in range(19)])
     global_params['token'] = token
-    # 【AI 修改】把每次登录发放的 token 记进列表，并发下多个 token 同时有效# 【AI 修改】把每次登录发放的 token 记进列表，并发下多个 token 同时有效
+    # 把每次登录发放的 token 记进列表，并发下多个 token 同时有效
     global_params.setdefault('tokens',[]).append(token)
     # 设置cookie在请求头
     acc_token = create_access_token(identity='example_user')
@@ -474,7 +474,7 @@ def delete_cart():
 
 
 def _mysql_exec(sql, params=None):
-    """【AI 新增】执行 INSERT/UPDATE 写库，模拟真实后端把订单数据落库。
+    """执行 INSERT/UPDATE 写库，模拟真实后端把订单数据落库。
 
     单独 try/except 包裹：MySQL 没启动或配置错误时只打印日志，
     不影响接口正常返回，保证原有 JSON 文件流程仍然可用。
@@ -522,12 +522,12 @@ def place_an_order():
     consignee_info = request.json.get('consignee_info')
     if all([goods_id, number, propertyChildIds, inviter_id, price, freight_insurance, discount_code]):
         if goods_id in good_id_list:
-            order_num = ''.join([random.choice(string.digits) for i in range(21)])
+            order_num = ''.join([random.choice(string.digits) for i in range(21)]) #orderNumber基本唯一
             with order_lock:
                 orders=_read_orders()
                 orders[order_num]=user_id
                 write_data(DIR_BASE+'/data/mockdata/orderNumber.json',json.dumps(orders))
-            # 【AI 新增】订单落库：初始状态 '0'（待支付），支付回调后再更新为 '1'/'2'
+            # 订单落库：初始状态 '0'（待支付），支付回调后再更新为 '1'/'2'
             _mysql_exec("INSERT INTO orders(order_number, user_id, status) VALUES (%s, %s, %s)",
                         (order_num, user_id, '0'))
             response = {
@@ -602,12 +602,12 @@ def order_pay():
 
 
 # ============================================================
-# 【AI 新增】支付回调接口：模拟第三方支付平台异步回调，
+# 支付回调接口：模拟第三方支付平台异步回调，
 # 将订单状态写入 orderStatus.json，供 checkOrderStatus 读取
 # ============================================================
 
 def _read_orders():
-    """【AI 修改】读取订单表文件（orderNumber.json，结构 {order_number: user_id}）。
+    """读取订单表文件（orderNumber.json，结构 {order_number: user_id}）。
           文件不存在或格式异常时返回空 dict，避免并发下单互相覆盖。
     """
     try:
@@ -615,7 +615,7 @@ def _read_orders():
     except Exception:
         return {}
 def _read_order_status():
-    """【AI 新增】读取订单回调状态，文件不存在或格式异常时返回 None
+    """读取订单回调状态，文件不存在或格式异常时返回 None
 
     用于幂等判断：支付回调可能因第三方网络重试而对同一订单重复调用，
     需要先读当前状态判断该订单是否已被处理过。
@@ -630,7 +630,7 @@ def _read_order_status():
 def pay_callback():
     """模拟第三方支付回调，写入订单状态（'1'=成功，'2'=失败）
 
-    【AI 新增】幂等处理：同一订单若已回调过（状态为最终态 '1'/'2'），
+    幂等处理：同一订单若已回调过（状态为最终态 '1'/'2'），
     则本次回调直接忽略、不再重复写入，避免重复回调导致状态被反复覆盖。
     """
     order_num = request.json.get('orderNumber')
@@ -638,7 +638,15 @@ def pay_callback():
     # all(iterable)：接收这个列表，仅当列表中所有元素的布尔值都为 True 时，才返回 True；只要有一个为 False，就返回 False
     if not all([order_num, status]):
         return jsonify({'error_code': '9001', 'message': '参数错误或缺少必填参数'})
-
+    #故障注入：通过X-Mock-Fault请求头控制本次回调是否模拟第三方异常
+    #放header而非业务参数，是为了不污染orderNumber/status这些真实业务字段
+    fault=request.headers.get('X-Mock-Fault')
+    if fault=='500':
+        #模拟第三方支付平台不可用：直接返回500，且不写订单状态（状态保持待支付）
+        return jsonify({'error':'第三方支付服务不可用','translate_language':'zh-CN'}),500
+    if fault=='delay':
+        #模拟第三方响应慢：睡2秒后继续正常处理
+        time.sleep(2)
     # 幂等判断：该订单已处于最终态，视为重复回调，直接忽略
     with order_lock:
         status_map = _read_order_status() or {}  # {order_number: status}
@@ -646,15 +654,13 @@ def pay_callback():
             return jsonify({'error_code': '0000', 'message': '重复回调，已忽略',
                             'translate_language': 'zh-CN'})
 
-        # 【AI 修改】状态按 orderNumber 做 key 追加，不再整文件覆盖
+        # 状态按 orderNumber 做 key 追加，不再整文件覆盖
         status_map[order_num] = status
         write_data(DIR_BASE + '/data/mockdata/orderStatus.json', json.dumps(status_map))
-    # 【AI 新增】回调推进订单状态：把数据库里该订单的状态同步为回调结果
+    # 回调推进订单状态：把数据库里该订单的状态同步为回调结果
     _mysql_exec("UPDATE orders SET status=%s WHERE order_number=%s", (status, order_num))
     return jsonify({'error_code': '0000', 'message': '回调处理成功',
                     'translate_language': 'zh-CN'})
-# ============================================================
-# 【AI 新增结束】
 # ============================================================
 
 
@@ -664,7 +670,7 @@ def check_order_status():
     orders = _read_orders()  # {order_number: user_id}
     order_number = request.json.get('orderNumber')
     if order_number in orders:
-        # ===== 【AI 修改】状态不再写死 '0'，改为读取支付回调写入的 orderStatus.json =====
+        # ===== 状态不再写死 '0'，改为读取支付回调写入的 orderStatus.json =====
         status = '0'  # 默认：尚未回调 / 待支付
         try:
             status_map = _read_order_status() or {}  # {order_number: status}
@@ -672,7 +678,6 @@ def check_order_status():
         except Exception:
             # 状态文件不存在或格式异常时，按「未回调」处理，返回默认状态
             status = '0'
-        # ===== 【AI 修改结束】 =====
         response = {
             'status': status,
             'queryTime': now_date(),
